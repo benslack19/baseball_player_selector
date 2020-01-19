@@ -16,16 +16,8 @@ Integrate audio, or text description from statcast data
 fantasy baseball based on advanced stats
 
 
-
 Using advanced stats to construct your roster
 
 
-
-
 what about a lineup constructor with order?
-
-
-
-
-
 
