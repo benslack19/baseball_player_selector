@@ -21,6 +21,7 @@ import os
 import numpy as np
 import pandas as pd
 import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import seaborn as sns
 import sklearn
@@ -103,11 +104,96 @@ def input():
 #   return render_template("output.html", births = births, the_result = the_result)
 
 def my_model(batter_name, pitcher_name):
-    df_results_summary = pd.read_csv('bp_output_results.csv')
-    bool_combo = (df_results_summary['Batter']==batter_name) & (df_results_summary['Pitcher']==pitcher_name)
-    output_statement = str(df_results_summary.loc[bool_combo, 'Results'].iloc[0])
+    try:
+        df_results_summary = pd.read_csv('bp_output_results.csv')
+        bool_combo = (df_results_summary['Batter']==batter_name) & (df_results_summary['Pitcher']==pitcher_name)
+        output_statement = str(df_results_summary.loc[bool_combo, 'Results'].iloc[0])
+    except:
+        output_statement = "Yikes, swing-and-a-miss. Let's try to make contact this time."
 
     return output_statement
+
+df_batting_100pa = pd.read_csv('df_batting_100pa.csv')
+df_pitching_50ip = pd.read_csv('df_pitching_50ip.csv')
+
+def return_bp_histograms(batter_name, pitcher_name):
+    f, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
+    df_batting_100pa["OBP"].hist(bins=20, color="gray", ax=ax1)
+    obp_val = np.float(
+        df_batting_100pa.loc[df_batting_100pa["Name"] == batter_name, "OBP"].iloc[0]
+    )
+    ax1.axvline(obp_val, 0, 100, c="red", linestyle=":")
+    ax1.set_title("Batter: " + batter_name, color="red")
+    ax1.set_xlabel("OBP")
+
+    df_pitching_50ip["WHIP"].hist(bins=30, color="gray", ax=ax2)
+    pitcher_whip = np.float(
+        df_pitching_50ip.loc[df_pitching_50ip["Name"] == pitcher_name, "WHIP"]
+    )
+    ax2.axvline(pitcher_whip, 0, 100, c="red", linestyle=":")
+    ax2.set_title("Pitcher: " + pitcher_name, color="red")
+    ax2.set_xlabel("WHIP")
+
+    save_name = (
+        "hist_"
+        + (batter_name).replace(" ", "-")
+        + "_"
+        + (pitcher_name).replace(" ", "-")
+    )
+
+    dir_path = "./flaskexample/static/bp_hist/"
+    plt.savefig(dir_path + save_name)
+
+    return save_name + ".png"
+
+def make_heatmap_w_input_mark(batter_name, pitcher_name):
+    bat_cat_min, bat_cat_max = 0.15, 0.5
+    pitch_cat_min, pitch_cat_max = 0.8, 1.8
+    n_points = 20
+
+    df_vals4heatmap = pd.read_csv("df_vals4heatmap.csv")
+    df_vals4heatmap_pivot = df_vals4heatmap.pivot("batter_cat", "pitcher_cat", "pred")
+
+    def fmt(s):
+        try:
+            n = "{:.3f}".format(float(s))
+        except:
+            n = ""
+        return n
+
+    f, ax1 = plt.subplots(figsize=(8, 8))
+    ax1 = sns.heatmap(df_vals4heatmap_pivot, cmap="RdBu_r")  # , annot=True)
+    ax1.set_xticklabels([fmt(label.get_text()) for label in ax1.get_xticklabels()])
+    ax1.invert_yaxis()
+    ax1.set_yticklabels([fmt(label.get_text()) for label in ax1.get_yticklabels()])
+    ax1.set_title('* = predicted on-base probability')
+
+    batter_obp = np.float(
+        df_batting_100pa.loc[df_batting_100pa["Name"] == batter_name, "OBP"]
+    )
+
+    pitcher_whip = np.float(
+        df_pitching_50ip.loc[df_pitching_50ip["Name"] == pitcher_name, "WHIP"]
+    )
+
+    bat_val, pitch_val = batter_obp, pitcher_whip
+    x_on_plot = (pitch_val / pitch_cat_max) * n_points
+    y_on_plot = (bat_val / bat_cat_max) * n_points
+    ax1.scatter(x_on_plot, y_on_plot, marker="*", s=100, color="orange")
+
+    save_name = (
+        "heatmap_"
+        + (batter_name).replace(" ", "-")
+        + "_"
+        + (pitcher_name).replace(" ", "-")
+    )
+
+    dir_path = "./flaskexample/static/bp_hist/"
+    plt.savefig(dir_path + save_name)
+
+    return save_name + ".png"
+
+
 
 @app.route('/output', methods=['GET', 'POST'])
 def output():
@@ -127,8 +213,17 @@ def output():
   
   # query = "SELECT index, name_last, name_first FROM player_id  WHERE name_last='%s'" % batter_lastname
   #SELECT index, name_last, name_first FROM player_id WHERE name_last=batter_last_name
-
+  # 
+  # Read in the result 
   result = my_model(batter, pitcher)
+
+  # Return the histogram image filename
+  hist_filename = return_bp_histograms(batter, pitcher)
+  # print(hist_filename)
+
+  # Return the heatmap image filename
+  heatmap_filename = make_heatmap_w_input_mark(batter, pitcher)
+  # print(hist_filename)
 
   # print(query)
   # query_results=pd.read_sql_query(query,con)
@@ -147,10 +242,28 @@ def output():
 #       births.append(dict(index=query_results.iloc[i]['index'], attendant=query_results.iloc[i]['attendant'], birth_month=query_results.iloc[i]['birth_month']))
 #       #the_result = ''
 #   the_result = ModelIt(patient,births)
-  return render_template("output.html", batter = batter, pitcher = pitcher, my_result = result)
+  return render_template("output.html", batter = batter, pitcher = pitcher, my_result = result, hist_filename=hist_filename, heatmap_filename=heatmap_filename)
   # return '<h1> Batter is {} and pitcher is {}</h1>'.format(batter, pitcher)
 
+# Figure out how to remove file so it doesn't take space - lower priority
+# def remove_bp_histogram_file():
+#     # pull inputs from fields and store it
+#     batter_name = request.args.get('batter')
+#     pitcher_name = request.args.get('pitcher')
+    
+#     save_name = (
+#         "hist_"
+#         + (batter_name).replace(" ", "-")
+#         + "_"
+#         + (pitcher_name).replace(" ", "-")
+#     )
 
+#     dir_path = "./flaskexample/static/bp_hist/"
+#     os.remove(dir_path + save_name + ".png")
+    
+#     return None
+
+# remove_bp_histogram_file()
 
 # BASEBALL CODE -----------------------------------------------
 
