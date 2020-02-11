@@ -25,333 +25,298 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import seaborn as sns
 import sklearn
+from sklearn.externals import joblib
+
 
 # ML
-from sklearn.linear_model import LinearRegression
-from sklearn.linear_model import LogisticRegression
-from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import train_test_split
-from sklearn import metrics
-from sklearn.metrics import accuracy_score
-from sklearn.metrics import classification_report
+# from sklearn.linear_model import LinearRegression
+# from sklearn.linear_model import LogisticRegression
+# from sklearn.preprocessing import StandardScaler
+# from sklearn.model_selection import train_test_split
+# from sklearn import metrics
+# from sklearn.metrics import accuracy_score
+# from sklearn.metrics import classification_report
+
+# For loading models
+import pickle
+from statsmodels.regression.linear_model import OLSResults
+from sklearn.externals import joblib
+
+# Load data  --------------------------------------------------------------------------------
+
+# Load batter and player information
+df_player_id = pd.read_csv("df_player_id.csv", index_col=0)
+
+df_batting_fromsc_250pa_prop_events = pd.read_csv(
+    "df_batting_fromsc_250pa_prop_events.csv", index_col=0
+)
+
+df_pitching_fromsc_500pa_prop_events = pd.read_csv(
+    "df_pitching_fromsc_500pa_prop_events.csv", index_col=0
+)
+
+
+# Load models 
+sm_est_model_onbase_loaded = OLSResults.load("sm_est_model_onbase_saved.pickle")
+sm_est_model_walk_loaded = OLSResults.load("sm_est_model_walk_saved.pickle")
+sm_est_model_single_loaded = OLSResults.load("sm_est_model_single_saved.pickle")
+sm_est_model_double_loaded = OLSResults.load("sm_est_model_double_saved.pickle")
+sm_est_model_homerun_loaded = OLSResults.load("sm_est_model_homerun_saved.pickle")
+sm_est_model_strikeout_loaded = OLSResults.load("sm_est_model_strikeout_saved.pickle")
+
+# Load scalers
+scale_onbase_loaded = joblib.load("scale_onbase_saved.pickle")
+scale_walk_loaded = joblib.load("scale_walk_saved.pickle")
+scale_single_loaded = joblib.load("scale_single_saved.pickle")
+scale_double_loaded = joblib.load("scale_double_saved.pickle")
+scale_homerun_loaded = joblib.load("scale_homerun_saved.pickle")
+scale_strikeout_loaded = joblib.load("scale_strikeout_saved.pickle")
 
 
 
-# INSIGHT EXAMPLE CODE -----------------------------------------------
+# Functions  --------------------------------------------------------------------------------
 
-# Python code to connect to Postgres
-# You may need to modify this based on your OS, 
-# as detailed in the postgres dev setup materials.
-# user = 'lacar' #add your Postgres username here      
-# host = 'localhost'
-# dbname = 'baseball'
-# db = create_engine('postgres://%s%s/%s'%(user,host,dbname))
-# con = None
-# con = psycopg2.connect(database = dbname, user = user, host = host)  # , password = 'mypassword') #add your Postgres password here - no password
+def return_batter_pitcher_ids(batter_name, pitcher_name):
 
+    batter_name = batter_name.lower().strip().replace(' ', '')
+    pitcher_name = pitcher_name.lower().strip().replace(' ', '')
+    
+    # If there's more than one, then take the player that played their first game more recently;
+    # and last game more recently
+    
+    bool_batter = df_player_id['name2search']==batter_name
+    if bool_batter.sum() > 1:
+        df_temp = df_player_id.loc[bool_batter, :]
+        # This actually just returns the first occurrence but I'll just go with this
+        ind2keep = df_temp["mlb_played_first"].idxmax()
+    else:
+        ind2keep = bool_batter
+    batter_id = df_player_id.loc[bool_batter, 'key_mlbam']
+    
+    bool_pitcher = df_player_id['name2search']==pitcher_name
+    if bool_pitcher.sum() > 1:
+        df_temp = df_player_id.loc[bool_pitcher, :]
+        # This actually just returns the first occurrence but I'll just go with this
+        ind2keep = df_temp["mlb_played_first"].idxmax()
+    else:
+        ind2keep = bool_pitcher
+    pitcher_id = df_player_id.loc[ind2keep, 'key_mlbam']
+    
+    return int(batter_id), int(pitcher_id)
+
+
+
+
+
+def get_prediction_se_obs(X_new, sm_model):
+    """
+    Import the two matchups
+    """
+
+    # Make prediction - SM
+    X_new_wconstant = sm.add_constant(X_new)
+    sm_model_prediction = sm_model.get_prediction(X_new_wconstant)
+    sm_model_prediction_mean = sm_model_prediction.predicted_mean
+    sm_model_prediction_se_obs = sm_model_prediction.se_obs
+    sm_model_prediction_ci_lower = sm_model_prediction.conf_int()[:, 0]
+    sm_model_prediction_ci_upper = sm_model_prediction.conf_int()[:, 1]
+
+    df_summary = pd.DataFrame(
+        {
+            "sm_pred": sm_model_prediction_mean,
+            "sm_se": sm_model_prediction_se_obs,
+            "sm_mean_minus_se": sm_model_prediction_mean - sm_model_prediction_se_obs,
+            "sm_mean_plus_se": sm_model_prediction_mean + sm_model_prediction_se_obs,
+            "sm_mean_lower_ci": sm_model_prediction_ci_lower,
+            "sm_mean_upper_ci": sm_model_prediction_ci_upper,
+        }
+    )
+
+    # Return the summary of the two matchups
+    return df_summary
+    # MATCHUP A ---------------
+    # Determine handedness
+    b_stand_A = df_batting_fromsc_250pa_prop_events.loc[matchup_A[0], "batter_stance"]
+    p_throws_A = df_pitching_fromsc_500pa_prop_events.loc[
+        matchup_A[1], "pitchers_throwing_hand"
+    ]
+
+    if b_stand_A == p_throws_A:
+        matchup_same_or_diff_A = "same"
+    else:
+        matchup_same_or_diff_A = "diff"
+
+    # Get event-specific columns in batter, pitcher characteristics DFs -----------
+    batter_col_A = "prop_" + event_type + "_event_p_throws_" + matchup_same_or_diff_A
+    pitcher_col_A = "prop_" + event_type + "_event_stand_" + matchup_same_or_diff_A
+    batA_val = df_batting_fromsc_250pa_prop_events.loc[matchup_A[0], batter_col_A]
+    pitchA_val = df_pitching_fromsc_500pa_prop_events.loc[matchup_A[1], pitcher_col_A]
+
+    # MATCHUP B ---------------
+    # Determine handedness
+    b_stand_B = df_batting_fromsc_250pa_prop_events.loc[matchup_B[0], "batter_stance"]
+    p_throws_B = df_pitching_fromsc_500pa_prop_events.loc[
+        matchup_B[1], "pitchers_throwing_hand"
+    ]
+
+    if b_stand_B == p_throws_B:
+        matchup_same_or_diff_B = "same"
+    else:
+        matchup_same_or_diff_B = "diff"
+
+    # Get event-specific columns in batter, pitcher characteristics DFs -----------
+    batter_col_B = "prop_" + event_type + "_event_p_throws_" + matchup_same_or_diff_B
+    pitcher_col_B = "prop_" + event_type + "_event_stand_" + matchup_same_or_diff_B
+    batB_val = df_batting_fromsc_250pa_prop_events.loc[matchup_B[0], batter_col_B]
+    pitchB_val = df_pitching_fromsc_500pa_prop_events.loc[matchup_B[1], pitcher_col_B]
+
+    X_vals = np.array([[batA_val, pitchA_val], [batB_val, pitchB_val]])
+
+    # Apply scaling specific to category  ---------
+
+    scale_dict = {
+        "onbase": scale_onbase_loaded,
+        "walk": scale_walk_loaded,
+        "single": scale_single_loaded,
+        "double": scale_double_loaded,
+        "homerun": scale_homerun_loaded,
+        "strikeout": scale_strikeout_loaded,
+    }
+
+    scaler = scale_dict[event_type]
+    X_vals_scaled = scaler.transform(X_vals)
+
+    return X_vals_scaled
+
+def create_figure(event_type, ax):
+    # f, ax = plt.subplots(figsize=(4, 2))
+
+    pred_table_dict = {
+        "onbase": df_summary_prediction_onbase,
+        "walk": df_summary_prediction_walk,
+        "single": df_summary_prediction_single,
+        "double": df_summary_prediction_double,
+        "homerun": df_summary_prediction_homerun,
+        "strikeout": df_summary_prediction_strikeout,
+    }
+
+    pred_table_name = pred_table_dict[event_type]
+
+    # Player 1
+    ax.scatter(pred_table_name.loc[0, "sm_pred"], 1.5, c="blue")
+    ax.plot(
+        (
+            pred_table_name.loc[0, "sm_mean_lower_ci"],
+            pred_table_name.loc[0, "sm_mean_upper_ci"],
+        ),
+        (1.5, 1.5),
+        "b-",
+    )
+
+    #     ax.plot(
+    #         (
+    #             pred_table_name.loc[0, "sm_mean_minus_se"],
+    #             pred_table_name.loc[0, "sm_mean_plus_se"],
+    #         ),
+    #         (1.5, 1.5),
+    #         "b-",
+    #     )
+
+    # Player 2
+    ax.scatter(pred_table_name.loc[1, "sm_pred"], 0.5, c="red")
+    ax.plot(
+        (
+            pred_table_name.loc[1, "sm_mean_lower_ci"],
+            pred_table_name.loc[1, "sm_mean_upper_ci"],
+        ),
+        (0.5, 0.5),
+        "r-",
+    )
+
+    #     ax.plot(
+    #         (
+    #             pred_table_name.loc[1, "sm_mean_minus_se"],
+    #             pred_table_name.loc[1, "sm_mean_plus_se"],
+    #         ),
+    #         (0.5, 0.5),
+    #         "r-",
+    #     )
+
+    # ax.set_xlim(0.2, 0.45)
+    ax.set_ylim(0, 2)
+    # ax.set_xlabel("prediction")
+    ax.set_title(event_type)
+    ax.get_yaxis().set_visible(False)
+
+    return ax
+# Start of data to html --------------------------------------------------------------------------------
 @app.route('/')
 @app.route('/index')
 def index():
     return render_template("baseball.html")
 
-# My example with the baseball database
-# @app.route('/db')
-# def db():
-#     sql_query = """                                                                       
-#                 SELECT index, name_last, name_first FROM player_id LIMIT 5;          
-#                 """
-#     player=''
-#     df_pid = pd.read_sql_query(sql_query,con)
-#     for i in range(0,5):
-#         player += df_pid.iloc[i]['name_last'] + ' ' + df_pid.iloc[i]['name_first']
-#         player += "<br>"
-        
-#     return player
-
-# @app.route('/db_fancy')
-# def cesareans_page_fancy():
-#     sql_query = """
-#                SELECT index, attendant, birth_month FROM birth_data_table WHERE delivery_method='Cesarean';
-#                 """
-#     query_results=pd.read_sql_query(sql_query,con)
-#     births = []
-#     for i in range(0,query_results.shape[0]):
-#         births.append(dict(index=query_results.iloc[i]['index'], attendant=query_results.iloc[i]['attendant'], birth_month=query_results.iloc[i]['birth_month']))
-#     return render_template('cesareans.html',births=births)
 
 @app.route('/input')
 def input():
     return render_template("input.html")
 
-# @app.route('/output')
-# def cesareans_output():
-#     return render_template("output.html")
-
-# @app.route('/output')
-# def cesareans_output():
-#   #pull 'birth_month' from input field and store it
-#   patient = request.args.get('birth_month')
-#     #just select the Cesareans  from the birth dtabase for the month that the user inputs
-#   query = "SELECT index, attendant, birth_month FROM birth_data_table WHERE delivery_method='Cesarean' AND birth_month='%s'" % patient
-#   print(query)
-#   query_results=pd.read_sql_query(query,con)
-#   print(query_results)
-#   births = []
-#   for i in range(0,query_results.shape[0]):
-#       births.append(dict(index=query_results.iloc[i]['index'], attendant=query_results.iloc[i]['attendant'], birth_month=query_results.iloc[i]['birth_month']))
-#       #the_result = ''
-#   the_result = ModelIt(patient,births)
-#   return render_template("output.html", births = births, the_result = the_result)
-
-def my_model(batter_name, pitcher_name):
-    try:
-        df_results_summary = pd.read_csv('bp_output_results.csv')
-        bool_combo = (df_results_summary['Batter']==batter_name) & (df_results_summary['Pitcher']==pitcher_name)
-        output_statement = str(df_results_summary.loc[bool_combo, 'Results'].iloc[0])
-    except:
-        output_statement = "Yikes, swing-and-a-miss. Let's try to make contact this time."
-
-    return output_statement
-
-df_batting_100pa = pd.read_csv('df_batting_100pa.csv')
-df_pitching_50ip = pd.read_csv('df_pitching_50ip.csv')
-
-def return_bp_histograms(batter_name, pitcher_name):
-    f, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
-    df_batting_100pa["OBP"].hist(bins=20, color="gray", ax=ax1)
-    obp_val = np.float(
-        df_batting_100pa.loc[df_batting_100pa["Name"] == batter_name, "OBP"].iloc[0]
-    )
-    ax1.axvline(obp_val, 0, 100, c="red", linestyle=":")
-    ax1.set_title("Batter: " + batter_name, color="red")
-    ax1.set_xlabel("OBP")
-
-    df_pitching_50ip["WHIP"].hist(bins=30, color="gray", ax=ax2)
-    pitcher_whip = np.float(
-        df_pitching_50ip.loc[df_pitching_50ip["Name"] == pitcher_name, "WHIP"]
-    )
-    ax2.axvline(pitcher_whip, 0, 100, c="red", linestyle=":")
-    ax2.set_title("Pitcher: " + pitcher_name, color="red")
-    ax2.set_xlabel("WHIP")
-
-    save_name = (
-        "hist_"
-        + (batter_name).replace(" ", "-")
-        + "_"
-        + (pitcher_name).replace(" ", "-")
-    )
-
-    dir_path = "./flaskexample/static/bp_hist/"
-    plt.savefig(dir_path + save_name)
-
-    return save_name + ".png"
-
-def make_heatmap_w_input_mark(batter_name, pitcher_name):
-    bat_cat_min, bat_cat_max = 0.15, 0.5
-    pitch_cat_min, pitch_cat_max = 0.8, 1.8
-    n_points = 20
-
-    df_vals4heatmap = pd.read_csv("df_vals4heatmap.csv")
-    df_vals4heatmap_pivot = df_vals4heatmap.pivot("batter_cat", "pitcher_cat", "pred")
-
-    def fmt(s):
-        try:
-            n = "{:.3f}".format(float(s))
-        except:
-            n = ""
-        return n
-
-    f, ax1 = plt.subplots(figsize=(8, 8))
-    ax1 = sns.heatmap(df_vals4heatmap_pivot, cmap="RdBu_r")  # , annot=True)
-    ax1.set_xticklabels([fmt(label.get_text()) for label in ax1.get_xticklabels()])
-    ax1.invert_yaxis()
-    ax1.set_yticklabels([fmt(label.get_text()) for label in ax1.get_yticklabels()])
-    ax1.set_title('* = predicted on-base probability')
-
-    batter_obp = np.float(
-        df_batting_100pa.loc[df_batting_100pa["Name"] == batter_name, "OBP"]
-    )
-
-    pitcher_whip = np.float(
-        df_pitching_50ip.loc[df_pitching_50ip["Name"] == pitcher_name, "WHIP"]
-    )
-
-    bat_val, pitch_val = batter_obp, pitcher_whip
-    x_on_plot = (pitch_val / pitch_cat_max) * n_points
-    y_on_plot = (bat_val / bat_cat_max) * n_points
-    ax1.scatter(x_on_plot, y_on_plot, marker="*", s=100, color="orange")
-
-    save_name = (
-        "heatmap_"
-        + (batter_name).replace(" ", "-")
-        + "_"
-        + (pitcher_name).replace(" ", "-")
-    )
-
-    dir_path = "./flaskexample/static/bp_hist/"
-    plt.savefig(dir_path + save_name)
-
-    return save_name + ".png"
-
-
 
 @app.route('/output', methods=['GET', 'POST'])
 def output():
-  # pull 'batter' from input field and store it
-  #batter = request.form['batter']
-  batter = request.args.get('batter')
-  # pull 'pitcher' from second input field and store it
-  #pitcher = request.form['pitcher']
-  pitcher = request.args.get('pitcher')
-  
-  # Select the batter, pitcher from the player database and get the relevant OBP
-  batter_firstname = batter.split()[0]
-  batter_lastname = batter.split()[1]
-  
-  pitcher_firstname = pitcher.split()[0]
-  pitcher_lastname = pitcher.split()[1]
-  
-  # query = "SELECT index, name_last, name_first FROM player_id  WHERE name_last='%s'" % batter_lastname
-  #SELECT index, name_last, name_first FROM player_id WHERE name_last=batter_last_name
-  # 
-  # Read in the result 
-  result = my_model(batter, pitcher)
+    # pull batter, pitcher from first set of inputs and store it
+    bp_A = return_batter_pitcher_ids(batter_A, pitcher_A)
+    bp_B = return_batter_pitcher_ids(batter_B, pitcher_B)
 
-  # Return the histogram image filename
-  hist_filename = return_bp_histograms(batter, pitcher)
-  # print(hist_filename)
+    matchupA = 'Matchup A is the batter ' + batter_A.upper() + ' and the pitcher ' + pitcher_A.upper()
+    matchupA = 'Matchup B is the batter ' + batter_A.upper() + ' and the pitcher ' + pitcher_B.upper()
 
-  # Return the heatmap image filename
-  heatmap_filename = make_heatmap_w_input_mark(batter, pitcher)
-  # print(hist_filename)
+    # Get predictions for each category
+    X_new_onbase = get_input_values_4model("onbase", bp_A, bp_B)
+    df_summary_prediction_onbase = get_prediction_se_obs(X_new_onbase, sm_est_model_onbase_loaded)
 
-  # print(query)
-  # query_results=pd.read_sql_query(query,con)
-#   print(query_results)
-#   births = []
-#   for i in range(0,query_results.shape[0]):
-#       births.append(dict(index=query_results.iloc[i]['index'], attendant=query_results.iloc[i]['attendant'], birth_month=query_results.iloc[i]['birth_month']))
-#       #the_result = ''
-#   the_result = ModelIt(patient,births)
-
-  # print(query)
-#   query_results=pd.read_sql_query(query,con)
-#   print(query_results)
-#   births = []
-#   for i in range(0,query_results.shape[0]):
-#       births.append(dict(index=query_results.iloc[i]['index'], attendant=query_results.iloc[i]['attendant'], birth_month=query_results.iloc[i]['birth_month']))
-#       #the_result = ''
-#   the_result = ModelIt(patient,births)
-  return render_template("output.html", batter = batter, pitcher = pitcher, my_result = result, hist_filename=hist_filename, heatmap_filename=heatmap_filename)
-  # return '<h1> Batter is {} and pitcher is {}</h1>'.format(batter, pitcher)
-
-# Figure out how to remove file so it doesn't take space - lower priority
-# def remove_bp_histogram_file():
-#     # pull inputs from fields and store it
-#     batter_name = request.args.get('batter')
-#     pitcher_name = request.args.get('pitcher')
+    X_new_walk = get_input_values_4model("walk", bp_A, bp_B)
+    df_summary_prediction_walk = get_prediction_se_obs(X_new_walk, sm_est_model_walk_loaded)
     
-#     save_name = (
-#         "hist_"
-#         + (batter_name).replace(" ", "-")
-#         + "_"
-#         + (pitcher_name).replace(" ", "-")
-#     )
-
-#     dir_path = "./flaskexample/static/bp_hist/"
-#     os.remove(dir_path + save_name + ".png")
+    X_new_single = get_input_values_4model("single", bp_A, bp_B)
+    df_summary_prediction_single = get_prediction_se_obs(X_new_single, sm_est_model_single_loaded)
     
-#     return None
+    X_new_double = get_input_values_4model("double", bp_A, bp_B)
+    df_summary_prediction_double = get_prediction_se_obs(X_new_double, sm_est_model_double_loaded)
+    
+    X_new_homerun = get_input_values_4model("homerun", bp_A, bp_B)
+    df_summary_prediction_homerun = get_prediction_se_obs(X_new_homerun, sm_est_model_homerun_loaded)
+    
+    X_new_strikeout = get_input_values_4model("strikeout", bp_A, bp_B)
+    df_summary_prediction_strikeout = get_prediction_se_obs(X_new_strikeout, sm_est_model_strikeout_loaded)
 
-# remove_bp_histogram_file()
+    df_matchup_summary = pd.DataFrame()
+    df_matchup_summary["onbase"] = df_summary_prediction_onbase["sm_pred"].T
+    df_matchup_summary["walk"] = df_summary_prediction_walk["sm_pred"].T
+    df_matchup_summary["single"] = df_summary_prediction_single["sm_pred"].T
+    df_matchup_summary["double"] = df_summary_prediction_double["sm_pred"].T
+    df_matchup_summary["homerun"] = df_summary_prediction_homerun["sm_pred"].T
+    df_matchup_summary["strikeout"] = df_summary_prediction_strikeout["sm_pred"].T
+    df_matchup_summary = df_matchup_summary.T
+    df_matchup_summary.columns = ["matchup A", "matchup B"]
+    # Pretty print - export and display
+    df_matchup_summary = df_matchup_summary.round(3)
+    df.to_html(header="true", table_id="table")
 
-# BASEBALL CODE -----------------------------------------------
+    f, ((ax1, ax2, ax3), (ax4, ax5, ax6)) = plt.subplots(2, 3, figsize=(12, 4))
+    create_figure("onbase", ax1)
+    create_figure("walk", ax2)
+    create_figure("single", ax3)
+    create_figure("double", ax4)
+    create_figure("homerun", ax5)
+    create_figure("strikeout", ax6)
+    plt.tight_layout()
 
-
-# Python code to connect to Postgres
-# You may need to modify this based on your OS, 
-# as detailed in the postgres dev setup materials.
-# user = 'lacar' #add your Postgres username here      
-# host = 'localhost'
-# dbname = 'baseball'
-# db = create_engine('postgres://%s%s/%s'%(user,host,dbname))
-# con = None
-# con = psycopg2.connect(database = dbname, user = user, host = host) #, password = 'mypassword') #add your Postgres password here - not sure if I had one
-
-# @app.route('/')
-# @app.route('/index')
-# def index():
-#     return render_template("index.html",
-#        title = 'Home', user = { 'nickname': 'Bubba' },
-#        )
-
-# # My example with the baseball database
-# @app.route('/db')
-# def return_player_id():
-#     sql_query = """                                                                       
-#                 SELECT * FROM player_id LIMIT 5;          
-#                 """
-#     df_pid = pd.read_sql_query(sql_query,con)
-#     return str(df_pid.loc[0, 'name_last'])
-
-
-# @app.route('/db_fancy')
-# def baseball_page_fancy():
-#     sql_query = """
-#                 SELECT * FROM player_id LIMIT 5;
-#                 """
-#     query_results=pd.read_sql_query(sql_query,con)
-#     players = []
-#     for i in range(0,query_results.shape[0]):
-#         players.append(dict(index=query_results.iloc[i]['index'], name_last=query_results.iloc[i]['name_last'], name_first=query_results.iloc[i]['name_last']))
-#     return render_template('baseball.html', baseball=baseball)
-
-# Insight example
-# @app.route('/db')
-# def birth_page():
-#     sql_query = """                                                                       
-#                 SELECT * FROM birth_data_table WHERE delivery_method='Cesarean';          
-#                 """
-#     query_results = pd.read_sql_query(sql_query,con)
-#     births = ""
-#     for i in range(0,10):
-#         births += query_results.iloc[i]['birth_month']
-#         births += "<br>"
-#     return births
-
-# Insight example
-# @app.route('/db_fancy')
-# def cesareans_page_fancy():
-#     sql_query = """
-#                SELECT index, attendant, birth_month FROM birth_data_table WHERE delivery_method='Cesarean';
-#                 """
-#     query_results=pd.read_sql_query(sql_query,con)
-#     births = []
-#     for i in range(0,query_results.shape[0]):
-#         births.append(dict(index=query_results.iloc[i]['index'], attendant=query_results.iloc[i]['attendant'], birth_month=query_results.iloc[i]['birth_month']))
-#     return render_template('cesareans.html',births=births)
-
-# Second edit of this file ------------
-# from flask import render_template
-# from flaskexample import app
-
-# @app.route('/')
-# @app.route('/index')
-# def index():
-#     user = { 'nickname': 'Bubba' } # fake user
-#     return render_template("index.html", title = 'Home', user = user)
+    dir_path = "./flaskexample/static/bp_hist/"
+    plt.savefig('matchup_results_fig.png')
+    matchup_results_fig = dir_path + 'matchup_results_fig.png'
 
 
-# First edit of this file ------------
 
-# from flaskexample import app
+  # return render_template("output.html", batter = batter, pitcher = pitcher, my_result = result, hist_filename=hist_filename, heatmap_filename=heatmap_filename)
+    return render_template("output.html", matchup_results_fig = matchup_results_fig, table = table)
 
-# @app.route('/')
-# @app.route('/index')
-# def index():
-#    return "Hello, World!"
-
-# This view is actually pretty simple; it just returns a string, 
-# to be displayed on the client's web browser. The two route 
-# decorators above the function create the mappings from 
-# urls / and /index to this function.
