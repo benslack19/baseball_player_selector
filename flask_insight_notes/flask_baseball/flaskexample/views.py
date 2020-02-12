@@ -26,7 +26,8 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import sklearn
 from sklearn.externals import joblib
-
+import statsmodels.api as sm
+from statsmodels.formula.api import ols
 
 # ML
 # from sklearn.linear_model import LinearRegression
@@ -54,7 +55,6 @@ df_batting_fromsc_250pa_prop_events = pd.read_csv(
 df_pitching_fromsc_500pa_prop_events = pd.read_csv(
     "df_pitching_fromsc_500pa_prop_events.csv", index_col=0
 )
-
 
 # Load models 
 sm_est_model_onbase_loaded = OLSResults.load("sm_est_model_onbase_saved.pickle")
@@ -104,36 +104,8 @@ def return_batter_pitcher_ids(batter_name, pitcher_name):
     
     return int(batter_id), int(pitcher_id)
 
+def get_input_values_4model(event_type, matchup_A, matchup_B):
 
-
-
-
-def get_prediction_se_obs(X_new, sm_model):
-    """
-    Import the two matchups
-    """
-
-    # Make prediction - SM
-    X_new_wconstant = sm.add_constant(X_new)
-    sm_model_prediction = sm_model.get_prediction(X_new_wconstant)
-    sm_model_prediction_mean = sm_model_prediction.predicted_mean
-    sm_model_prediction_se_obs = sm_model_prediction.se_obs
-    sm_model_prediction_ci_lower = sm_model_prediction.conf_int()[:, 0]
-    sm_model_prediction_ci_upper = sm_model_prediction.conf_int()[:, 1]
-
-    df_summary = pd.DataFrame(
-        {
-            "sm_pred": sm_model_prediction_mean,
-            "sm_se": sm_model_prediction_se_obs,
-            "sm_mean_minus_se": sm_model_prediction_mean - sm_model_prediction_se_obs,
-            "sm_mean_plus_se": sm_model_prediction_mean + sm_model_prediction_se_obs,
-            "sm_mean_lower_ci": sm_model_prediction_ci_lower,
-            "sm_mean_upper_ci": sm_model_prediction_ci_upper,
-        }
-    )
-
-    # Return the summary of the two matchups
-    return df_summary
     # MATCHUP A ---------------
     # Determine handedness
     b_stand_A = df_batting_fromsc_250pa_prop_events.loc[matchup_A[0], "batter_stance"]
@@ -188,19 +160,35 @@ def get_prediction_se_obs(X_new, sm_model):
 
     return X_vals_scaled
 
-def create_figure(event_type, ax):
+def get_prediction_se_obs(X_new, sm_model):
+    """
+    Import the two matchups
+    """
+
+    # Make prediction - SM
+    X_new_wconstant = sm.add_constant(X_new)
+    sm_model_prediction = sm_model.get_prediction(X_new_wconstant)
+    sm_model_prediction_mean = sm_model_prediction.predicted_mean
+    sm_model_prediction_se_obs = sm_model_prediction.se_obs
+    sm_model_prediction_ci_lower = sm_model_prediction.conf_int()[:, 0]
+    sm_model_prediction_ci_upper = sm_model_prediction.conf_int()[:, 1]
+
+    df_summary = pd.DataFrame(
+        {
+            "sm_pred": sm_model_prediction_mean,
+            "sm_se": sm_model_prediction_se_obs,
+            "sm_mean_minus_se": sm_model_prediction_mean - sm_model_prediction_se_obs,
+            "sm_mean_plus_se": sm_model_prediction_mean + sm_model_prediction_se_obs,
+            "sm_mean_lower_ci": sm_model_prediction_ci_lower,
+            "sm_mean_upper_ci": sm_model_prediction_ci_upper,
+        }
+    )
+
+    # Return the summary of the two matchups
+    return df_summary
+
+def create_figure(event_type, ax, pred_table_name):
     # f, ax = plt.subplots(figsize=(4, 2))
-
-    pred_table_dict = {
-        "onbase": df_summary_prediction_onbase,
-        "walk": df_summary_prediction_walk,
-        "single": df_summary_prediction_single,
-        "double": df_summary_prediction_double,
-        "homerun": df_summary_prediction_homerun,
-        "strikeout": df_summary_prediction_strikeout,
-    }
-
-    pred_table_name = pred_table_dict[event_type]
 
     # Player 1
     ax.scatter(pred_table_name.loc[0, "sm_pred"], 1.5, c="blue")
@@ -213,15 +201,6 @@ def create_figure(event_type, ax):
         "b-",
     )
 
-    #     ax.plot(
-    #         (
-    #             pred_table_name.loc[0, "sm_mean_minus_se"],
-    #             pred_table_name.loc[0, "sm_mean_plus_se"],
-    #         ),
-    #         (1.5, 1.5),
-    #         "b-",
-    #     )
-
     # Player 2
     ax.scatter(pred_table_name.loc[1, "sm_pred"], 0.5, c="red")
     ax.plot(
@@ -233,22 +212,14 @@ def create_figure(event_type, ax):
         "r-",
     )
 
-    #     ax.plot(
-    #         (
-    #             pred_table_name.loc[1, "sm_mean_minus_se"],
-    #             pred_table_name.loc[1, "sm_mean_plus_se"],
-    #         ),
-    #         (0.5, 0.5),
-    #         "r-",
-    #     )
-
-    # ax.set_xlim(0.2, 0.45)
     ax.set_ylim(0, 2)
     # ax.set_xlabel("prediction")
     ax.set_title(event_type)
     ax.get_yaxis().set_visible(False)
 
     return ax
+
+
 # Start of data to html --------------------------------------------------------------------------------
 @app.route('/')
 @app.route('/index')
@@ -264,30 +235,43 @@ def input():
 @app.route('/output', methods=['GET', 'POST'])
 def output():
     # pull batter, pitcher from first set of inputs and store it
+    batter_A = request.args.get('batter_A')
+    pitcher_A = request.args.get('pitcher_A')
+    batter_B = request.args.get('batter_B')
+    pitcher_B = request.args.get('pitcher_B')
+
+    # print(batter_A, pitcher_A, batter_B, pitcher_B)
+
     bp_A = return_batter_pitcher_ids(batter_A, pitcher_A)
     bp_B = return_batter_pitcher_ids(batter_B, pitcher_B)
 
-    matchupA = 'Matchup A is the batter ' + batter_A.upper() + ' and the pitcher ' + pitcher_A.upper()
-    matchupA = 'Matchup B is the batter ' + batter_A.upper() + ' and the pitcher ' + pitcher_B.upper()
+    matchupA = 'Matchup A (blue) is the batter ' + batter_A.upper() + ' and the pitcher ' + pitcher_A.upper()
+    matchupB = 'Matchup B (red) is the batter ' + batter_B.upper() + ' and the pitcher ' + pitcher_B.upper()
 
     # Get predictions for each category
     X_new_onbase = get_input_values_4model("onbase", bp_A, bp_B)
     df_summary_prediction_onbase = get_prediction_se_obs(X_new_onbase, sm_est_model_onbase_loaded)
+    print(df_summary_prediction_onbase)
 
     X_new_walk = get_input_values_4model("walk", bp_A, bp_B)
     df_summary_prediction_walk = get_prediction_se_obs(X_new_walk, sm_est_model_walk_loaded)
-    
+    print(df_summary_prediction_walk)
+
     X_new_single = get_input_values_4model("single", bp_A, bp_B)
     df_summary_prediction_single = get_prediction_se_obs(X_new_single, sm_est_model_single_loaded)
-    
+    print(df_summary_prediction_single)
+
     X_new_double = get_input_values_4model("double", bp_A, bp_B)
     df_summary_prediction_double = get_prediction_se_obs(X_new_double, sm_est_model_double_loaded)
-    
+    print(df_summary_prediction_double)
+
     X_new_homerun = get_input_values_4model("homerun", bp_A, bp_B)
     df_summary_prediction_homerun = get_prediction_se_obs(X_new_homerun, sm_est_model_homerun_loaded)
-    
+    print(df_summary_prediction_homerun)
+
     X_new_strikeout = get_input_values_4model("strikeout", bp_A, bp_B)
     df_summary_prediction_strikeout = get_prediction_se_obs(X_new_strikeout, sm_est_model_strikeout_loaded)
+    print(df_summary_prediction_strikeout)
 
     df_matchup_summary = pd.DataFrame()
     df_matchup_summary["onbase"] = df_summary_prediction_onbase["sm_pred"].T
@@ -300,23 +284,25 @@ def output():
     df_matchup_summary.columns = ["matchup A", "matchup B"]
     # Pretty print - export and display
     df_matchup_summary = df_matchup_summary.round(3)
-    df.to_html(header="true", table_id="table")
-
+    
     f, ((ax1, ax2, ax3), (ax4, ax5, ax6)) = plt.subplots(2, 3, figsize=(12, 4))
-    create_figure("onbase", ax1)
-    create_figure("walk", ax2)
-    create_figure("single", ax3)
-    create_figure("double", ax4)
-    create_figure("homerun", ax5)
-    create_figure("strikeout", ax6)
+
+    create_figure("onbase", ax1, df_summary_prediction_onbase)
+    create_figure("walk", ax2, df_summary_prediction_walk)
+    create_figure("single", ax3, df_summary_prediction_single)
+    create_figure("double", ax4, df_summary_prediction_double)
+    create_figure("homerun", ax5, df_summary_prediction_homerun)
+    create_figure("strikeout", ax6, df_summary_prediction_strikeout)
+
     plt.tight_layout()
 
     dir_path = "./flaskexample/static/bp_hist/"
-    plt.savefig('matchup_results_fig.png')
-    matchup_results_fig = dir_path + 'matchup_results_fig.png'
+    plt.savefig(dir_path + "matchup_results_fig_01.png")
+    matchup_results_fig = "matchup_results_fig_01.png"
+    # print(matchup_results_fig)
 
 
-
-  # return render_template("output.html", batter = batter, pitcher = pitcher, my_result = result, hist_filename=hist_filename, heatmap_filename=heatmap_filename)
-    return render_template("output.html", matchup_results_fig = matchup_results_fig, table = table)
+    #return render_template("output.html", matchupA = matchupA, matchupB = matchupB, matchup_results_fig = matchup_results_fig, tables = [df_matchup_summary.to_html(classes='data')],  titles=df_matchup_summary.columns.values)
+    return render_template("output.html", matchupA = matchupA, matchupB = matchupB, matchup_results_fig = matchup_results_fig, table = df_matchup_summary.to_html())
+  
 

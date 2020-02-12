@@ -56,9 +56,10 @@
 
                 <img src="{{ url_for('static', filename='bp_hist/' + matchup_results_fig)}}" alt="centered image" />
 
+                {% for table in tables %}
+                {{titles[loop.index]}}
                 {{ table|safe }}
-              
-
+                {% endfor %}
                
 
     <!-- Bootstrap core JavaScript
