@@ -303,6 +303,7 @@ def output():
 
 
     #return render_template("output.html", matchupA = matchupA, matchupB = matchupB, matchup_results_fig = matchup_results_fig, tables = [df_matchup_summary.to_html(classes='data')],  titles=df_matchup_summary.columns.values)
+    # working copy with output_v1 return render_template("output.html", matchupA = matchupA, matchupB = matchupB, matchup_results_fig = matchup_results_fig, table = df_matchup_summary.to_html())
     return render_template("output.html", matchupA = matchupA, matchupB = matchupB, matchup_results_fig = matchup_results_fig, table = df_matchup_summary.to_html())
   
 

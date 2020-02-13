@@ -7,7 +7,7 @@
     <meta name="author" content="">
     <link rel="icon" href="/docs/4.1/assets/img/favicons/favicon.ico">
 
-    <title>Enter your matchups</title>
+    <title>Matchup results</title>
 
     <link rel="canonical" href="https://getbootstrap.com/docs/4.1/examples/starter-template/">
 
@@ -39,44 +39,27 @@
 
 <br><br>
 
-    <main role="main" class="container"></main>
-        <div class="starter-template">
-            <h2>Enter your matchup</h2>
-            <p>Results are limited to players with minimum number of plate appearances (batters with >250 PAs, pitchers with >500 PAs pitched).</p>
-        </div>
-    
-        <div class = "container">
-          <form  action="/output" method="GET">
-
-            <div class="form-group">
-              <label for="batter_A">Batter_A:</label>
-              <input type="text" id="batter_A" name='batter_A' placeholder="e.g. Mike Trout">
-            </div>
-            <div class="form-group">
-              <label for="pitcher_A">Pitcher_A:</label>
-              <input type="text" id="pitcher_A" name='pitcher_A' placeholder="e.g. Gerrit Cole">
-            </div>
-
-          <div class="form-group">
-              <label for="batter_B">Batter_B:</label>
-              <input type="text" id="batter_B" name='batter_B' placeholder="e.g. Mookie Betts">
-            </div>
-            <div class="form-group">
-              <label for="pitcher_B">Pitcher_B:</label>
-              <input type="text" id="pitcher_B" name='pitcher_B' placeholder="e.g. Justin Verlander">
-            </div>
+<div class="container">
+  <div class="starter-template">
+      <h2>Results Page</h2>
+      
+      <p> {{ matchupA }} </p>
+      <p> {{ matchupB }} </p>
 
 
-            <div>
-              <button type="submit" class="btn btn-default btn-lg">Find the results of this matchup!</button>
-            </div>
-    
-          </form>
-        </div>
-    
-        <script src="https://code.jquery.com/jquery-1.10.2.min.js"></script>
-        <script src="static/js/bootstrap.min.js"></script>
-    </main><!-- /.container -->
+  </div>
+
+  <script src="https://code.jquery.com/jquery-1.10.2.min.js"></script>
+  <script src="static/js/bootstrap.min.js"></script>
+
+</div> <!-- /.container-->
+
+                <img src="{{ url_for('static', filename='bp_hist/' + matchup_results_fig)}}" alt="centered image" />
+
+                {{ table|safe }}
+              
+
+               
 
     <!-- Bootstrap core JavaScript
     ================================================== -->
